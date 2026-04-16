@@ -78,14 +78,18 @@ cp .env.example .env          # add your Neon DATABASE_URL
 pip install -r requirements.txt
 
 # 2. Seed test data (if needed)
-python seed_students.py --count 2500
+python -m ingestion.seed_students --count 2500
 
-# 3. Train the model
-python train.py                # live DB data
-python train.py --synthetic 500  # or synthetic data
+# 3. Run the full pipeline (extract → features → train → register → predict)
+python pipeline.py
+
+# — OR — run individual stages:
+python -m training.train                # train only
+python -m training.compare_models       # LR vs RF vs XGB comparison
+python -m evaluation.backtest           # temporal holdout check
 
 # 4. Start the API
-uvicorn api:app --port 8000 --reload
+uvicorn serving.api:app --port 8000 --reload
 
 # 5. Test it
 curl http://localhost:8000/summary
@@ -95,20 +99,69 @@ curl http://localhost:8000/predictions?risk_level=high&limit=5
 mlflow ui
 ```
 
+## DVC (data + pipeline versioning)
+
+The repo is DVC-enabled. The pipeline (`extract → features → train`) is
+declared in `dvc.yaml` with parameters in `params.yaml`.
+
+```bash
+# View the stage DAG
+dvc dag
+
+# Run the whole pipeline — only re-runs what actually changed
+dvc repro
+
+# See current metrics
+dvc metrics show
+
+# Compare metrics to the last committed run
+dvc metrics diff
+
+# Push tracked data/models to the remote
+dvc push
+
+# Pull them back on another machine (after git clone + pip install)
+dvc pull
+```
+
+**Two ways to run the pipeline, pick the right one for the task:**
+
+- `python pipeline.py` — ad-hoc runs, timestamped snapshots under `data/raw/`, MLflow tracking + registry promotion.
+- `dvc repro` — reproducible runs with stable outputs at `data/dvc/`, metric diffing across runs, smart caching (skips unchanged stages).
+
+Both write models to `artifacts/` and log experiments to `mlruns/`. Pick
+`pipeline.py` when you just want to retrain; pick `dvc repro` when you're
+iterating on features or hyperparams and want to compare runs.
+
 ## Project Structure
 
 ```
 taalmaster-ml/
-├── config.py               # DB connection, model paths, dropout threshold
-├── data_extraction.py       # Step 1: SQL queries → raw DataFrames
-├── feature_engineering.py   # Step 2: raw data → 32 ML features
-├── train.py                 # Step 3: XGBoost training + MLflow tracking
-├── predict.py               # Step 4: risk scoring + explainability
-├── api.py                   # Step 5: FastAPI serving layer
-├── seed_students.py         # Utility: seed realistic test data
+├── config.py                     # DB connection, model paths, dropout threshold
+├── pipeline.py                   # End-to-end orchestrator (extract → serve)
+├── run_scheduled.bat             # Windows Task Scheduler wrapper
 ├── requirements.txt
-├── artifacts/               # Trained model files (git-ignored)
-└── mlruns/                  # MLflow experiment logs (git-ignored)
+├── ingestion/                    # Step 1 — pull raw data from the DB
+│   ├── data_extraction.py
+│   └── seed_students.py          # Utility: seed realistic test data
+├── transformation/               # Step 2 — raw rows → 32 ML features
+│   └── feature_engineering.py
+├── training/                     # Step 3 — fit models, log to MLflow
+│   ├── train.py                  # XGBoost + 5-fold CV
+│   └── compare_models.py         # LR vs RF vs XGB side-by-side
+├── evaluation/                   # Step 3.5 — is the model actually good?
+│   └── backtest.py               # Temporal holdout validation
+├── inference/                    # Step 4 — score students, explain risk
+│   └── predict.py
+├── serving/                      # Step 5 — expose predictions over HTTP
+│   └── api.py                    # FastAPI endpoints
+├── artifacts/                    # Trained model files (git-ignored)
+├── data/                         # Intermediate outputs (git-ignored)
+│   ├── raw/                      # Timestamped DB snapshots
+│   ├── features/                 # Engineered feature matrices
+│   └── predictions/              # Scored students per run
+├── logs/                         # Scheduled-task logs (git-ignored)
+└── mlruns/                       # MLflow experiment logs (git-ignored)
 ```
 
 ## Connecting to TaalMaster Admin Dashboard

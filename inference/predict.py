@@ -22,14 +22,90 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 
-from config import MODEL_PATH, FEATURE_COLS_PATH
-from feature_engineering import build_feature_matrix, get_feature_columns
+import mlflow
+from mlflow.tracking import MlflowClient
+
+from config import (
+    MODEL_PATH, FEATURE_COLS_PATH,
+    MLFLOW_TRACKING_URI, REGISTERED_MODEL_NAME,
+)
+from transformation.feature_engineering import build_feature_matrix, get_feature_columns
+
+
+# Cache the model in memory for the lifetime of the process.
+# Reload by restarting the API (or calling reset_model_cache()).
+_model_cache: dict = {"model": None, "feature_cols": None, "version": None, "source": None}
+
+
+def reset_model_cache() -> None:
+    _model_cache.update({"model": None, "feature_cols": None, "version": None, "source": None})
 
 
 def load_model():
+    """
+    Load the model currently in Production from the MLflow registry.
+    Falls back to the local joblib file if no Production version is registered.
+
+    The registry is the source of truth: promoting a new version via
+    `stage_register` in pipeline.py will be picked up the next time this
+    function runs on a fresh cache (i.e. after an API restart).
+    """
+    if _model_cache["model"] is not None:
+        return _model_cache["model"], _model_cache["feature_cols"]
+
+    # --- try the MLflow registry ---
+    try:
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        client = MlflowClient(tracking_uri=MLFLOW_TRACKING_URI)
+        prod = client.get_latest_versions(REGISTERED_MODEL_NAME, stages=["Production"])
+        if prod:
+            v = prod[0]
+            # We logged the joblib artifact alongside the xgboost model in train.py;
+            # pulling the joblib keeps the sklearn-style .predict_proba / .feature_importances_
+            # interface that the rest of this module relies on.
+            model_path = mlflow.artifacts.download_artifacts(
+                run_id=v.run_id, artifact_path="dropout_model.joblib"
+            )
+            cols_path = mlflow.artifacts.download_artifacts(
+                run_id=v.run_id, artifact_path="feature_columns.joblib"
+            )
+            model = joblib.load(model_path)
+            feature_cols = joblib.load(cols_path)
+
+            _model_cache.update({
+                "model": model,
+                "feature_cols": feature_cols,
+                "version": f"{REGISTERED_MODEL_NAME} v{v.version}",
+                "source": "mlflow_registry",
+            })
+            return model, feature_cols
+    except Exception as exc:
+        print(f"[predict] registry unavailable ({exc!r}); falling back to local joblib")
+
+    # --- fallback: the last model train.py wrote to disk ---
     model = joblib.load(MODEL_PATH)
     feature_cols = joblib.load(FEATURE_COLS_PATH)
+    _model_cache.update({
+        "model": model,
+        "feature_cols": feature_cols,
+        "version": "local-joblib",
+        "source": "local_file",
+    })
     return model, feature_cols
+
+
+def current_model_version() -> str:
+    """Returns the identifier of the model currently serving predictions."""
+    if _model_cache["version"] is None:
+        load_model()
+    return _model_cache["version"]
+
+
+def current_model_source() -> str:
+    """Returns 'mlflow_registry' or 'local_file'."""
+    if _model_cache["source"] is None:
+        load_model()
+    return _model_cache["source"]
 
 
 def predict_all_students(raw_data: dict) -> list[dict]:
@@ -39,7 +115,9 @@ def predict_all_students(raw_data: dict) -> list[dict]:
     """
     model, feature_cols = load_model()
     ref_date = datetime.utcnow()
-    features = build_feature_matrix(raw_data, ref_date)
+    # compute_label=False: at inference time we're predicting the future, so
+    # there is no forward window to observe. Skip the label computation.
+    features = build_feature_matrix(raw_data, ref_date, compute_label=False)
 
     X = features[feature_cols].values
     probabilities = model.predict_proba(X)[:, 1]

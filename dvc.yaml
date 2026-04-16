@@ -1,0 +1,53 @@
+# DVC pipeline — declarative DAG of stages.
+#
+# Run everything that's out of date:
+#     dvc repro
+# Force re-run one stage:
+#     dvc repro --force features
+# View the DAG:
+#     dvc dag
+# See metrics after a run:
+#     dvc metrics show
+# Compare metrics to the last committed run:
+#     dvc metrics diff
+stages:
+
+  extract:
+    cmd: python -m scripts.run_extract
+    # `always_changed: true` because the DB is an external source — we want
+    # every `dvc repro` to re-pull. DVC still hashes the OUTPUT files, so
+    # downstream stages only re-run if the Neon data actually changed.
+    always_changed: true
+    deps:
+      - scripts/run_extract.py
+      - ingestion/data_extraction.py
+      - config.py
+    outs:
+      - data/dvc/raw
+
+  features:
+    cmd: python -m scripts.run_features
+    deps:
+      - scripts/run_features.py
+      - transformation/feature_engineering.py
+      - data/dvc/raw
+    params:
+      - features.ref_offset_days
+      - features.window_days
+    outs:
+      - data/dvc/features.parquet
+
+  train:
+    cmd: python -m scripts.run_train
+    deps:
+      - scripts/run_train.py
+      - training/train.py
+      - data/dvc/features.parquet
+    outs:
+      - artifacts/dropout_model.joblib
+      - artifacts/feature_columns.joblib
+    metrics:
+      - metrics.json:
+          # cache: false keeps metrics.json in git (small JSON, useful in diffs)
+          # rather than in DVC storage.
+          cache: false

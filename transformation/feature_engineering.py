@@ -10,6 +10,20 @@ WHY RAW DATA ISN'T ENOUGH:
   But "user 5 has been inactive for 6 days and their activity is declining"
   is a strong dropout signal.
 
+──────────────────────────────────────────────────────────────────────
+TEMPORAL SPLIT (the MOST IMPORTANT design choice in this file)
+──────────────────────────────────────────────────────────────────────
+  Every feature is computed using ONLY data from BEFORE `ref_date`.
+  The LABEL is computed using data from AFTER `ref_date` (a forward window).
+
+  This simulates a real prediction: "Standing at ref_date, using only
+  what we knew then, can we predict who will go silent next?"
+
+  Without this split, features like 'active_days_last_7' would leak the
+  answer — a user with 0 active days in the last week IS dropout by
+  definition, so the model just memorizes the rule instead of learning
+  predictive patterns.
+
 THE 6 FEATURE GROUPS (32 features total):
 
   1. ACTIVITY (9 features)
@@ -73,6 +87,10 @@ def build_activity_features(students: pd.DataFrame, streaks: pd.DataFrame, ref_d
 
     streaks = streaks.copy()
     streaks["activity_date"] = pd.to_datetime(streaks["activity_date"])
+    # TEMPORAL CUT: ignore anything at or after ref_date — the "future" from
+    # the model's point of view. Without this line, windows like "last 7 days"
+    # would silently peek at data that wouldn't be available at prediction time.
+    streaks = streaks[streaks["activity_date"] < ref]
 
     agg = streaks.groupby("user_id").agg(
         last_activity=("activity_date", "max"),
@@ -107,9 +125,11 @@ def build_activity_features(students: pd.DataFrame, streaks: pd.DataFrame, ref_d
 
         longest = max(streaks_list)
 
-        # Current streak: how many consecutive days ending at today?
+        # Current streak: how many consecutive days of activity leading up
+        # to ref_date? We start one day before ref (since streaks are strictly
+        # < ref due to the temporal cut above).
         cur = 0
-        check = ref.date()
+        check = (ref - timedelta(days=1)).date()
         for d in reversed(dates):
             if d == check:
                 cur += 1
@@ -148,7 +168,8 @@ def build_activity_features(students: pd.DataFrame, streaks: pd.DataFrame, ref_d
 # ---------------------------------------------------------------------------
 # 2. QUIZ FEATURES — performance + effort
 # ---------------------------------------------------------------------------
-def build_quiz_features(students: pd.DataFrame, quizzes: pd.DataFrame) -> pd.DataFrame:
+def build_quiz_features(students: pd.DataFrame, quizzes: pd.DataFrame, ref_date: datetime) -> pd.DataFrame:
+    ref = pd.Timestamp(ref_date)
     user_ids = students[["user_id"]].copy()
 
     if quizzes.empty:
@@ -161,8 +182,18 @@ def build_quiz_features(students: pd.DataFrame, quizzes: pd.DataFrame) -> pd.Dat
         return user_ids
 
     q = quizzes.copy()
-    q["score_pct"] = _safe_div(q["score"].values, q["total_questions"].values)
     q["completed_at"] = pd.to_datetime(q["completed_at"])
+    q = q[q["completed_at"] < ref]   # temporal cut
+    if q.empty:
+        for col in [
+            "total_quizzes", "avg_quiz_score_pct", "quiz_score_trend",
+            "distinct_quiz_modes", "distinct_sections_quizzed",
+            "quizzes_last_7_days", "quizzes_last_14_days",
+        ]:
+            user_ids[col] = 0.0
+        return user_ids
+
+    q["score_pct"] = _safe_div(q["score"].values, q["total_questions"].values)
 
     agg = q.groupby("user_id").agg(
         total_quizzes=("score", "count"),
@@ -184,9 +215,10 @@ def build_quiz_features(students: pd.DataFrame, quizzes: pd.DataFrame) -> pd.Dat
     trends.columns = ["user_id", "quiz_score_trend"]
     agg = agg.merge(trends, on="user_id", how="left")
 
-    now = q["completed_at"].max()
+    # Windows are anchored on ref_date (not on the last quiz in the data) so
+    # "last 7 days" means the 7 days immediately before ref_date.
     for window, col in [(7, "quizzes_last_7_days"), (14, "quizzes_last_14_days")]:
-        cutoff = now - timedelta(days=window)
+        cutoff = ref - timedelta(days=window)
         recent = q[q["completed_at"] >= cutoff].groupby("user_id").size().reset_index(name=col)
         agg = agg.merge(recent, on="user_id", how="left")
 
@@ -197,7 +229,8 @@ def build_quiz_features(students: pd.DataFrame, quizzes: pd.DataFrame) -> pd.Dat
 # ---------------------------------------------------------------------------
 # 3. VOCABULARY FEATURES — breadth and depth of learning
 # ---------------------------------------------------------------------------
-def build_vocabulary_features(students: pd.DataFrame, words: pd.DataFrame, total_vocab: int) -> pd.DataFrame:
+def build_vocabulary_features(students: pd.DataFrame, words: pd.DataFrame, total_vocab: int, ref_date: datetime) -> pd.DataFrame:
+    ref = pd.Timestamp(ref_date)
     user_ids = students[["user_id"]].copy()
 
     if words.empty:
@@ -209,6 +242,16 @@ def build_vocabulary_features(students: pd.DataFrame, words: pd.DataFrame, total
         return user_ids
 
     w = words.copy()
+    w["last_seen"] = pd.to_datetime(w["last_seen"])
+    w = w[w["last_seen"] < ref]   # temporal cut
+    if w.empty:
+        for col in [
+            "words_attempted", "words_mastered", "words_learning",
+            "mastery_rate", "avg_accuracy", "vocab_coverage",
+        ]:
+            user_ids[col] = 0.0
+        return user_ids
+
     agg = w.groupby("user_id").agg(
         words_attempted=("vocabulary_id", "count"),
         words_mastered=("status", lambda x: (x == "mastered").sum()),
@@ -230,7 +273,8 @@ def build_vocabulary_features(students: pd.DataFrame, words: pd.DataFrame, total
 # ---------------------------------------------------------------------------
 # 4. WRITING FEATURES — highest-effort activity
 # ---------------------------------------------------------------------------
-def build_writing_features(students: pd.DataFrame, writing: pd.DataFrame) -> pd.DataFrame:
+def build_writing_features(students: pd.DataFrame, writing: pd.DataFrame, ref_date: datetime) -> pd.DataFrame:
+    ref = pd.Timestamp(ref_date)
     user_ids = students[["user_id"]].copy()
 
     if writing.empty:
@@ -240,6 +284,11 @@ def build_writing_features(students: pd.DataFrame, writing: pd.DataFrame) -> pd.
 
     wr = writing.copy()
     wr["submitted_at"] = pd.to_datetime(wr["submitted_at"])
+    wr = wr[wr["submitted_at"] < ref]   # temporal cut
+    if wr.empty:
+        for col in ["total_writing_submissions", "avg_writing_score", "writing_score_trend"]:
+            user_ids[col] = 0.0
+        return user_ids
 
     agg = wr.groupby("user_id").agg(
         total_writing_submissions=("score", "count"),
@@ -264,9 +313,18 @@ def build_writing_features(students: pd.DataFrame, writing: pd.DataFrame) -> pd.
 # ---------------------------------------------------------------------------
 # 5. AUDIO FEATURES — passive engagement
 # ---------------------------------------------------------------------------
-def build_audio_features(students: pd.DataFrame, audio: pd.DataFrame, total_audio: int) -> pd.DataFrame:
+def build_audio_features(students: pd.DataFrame, audio: pd.DataFrame, total_audio: int, ref_date: datetime) -> pd.DataFrame:
+    ref = pd.Timestamp(ref_date)
     user_ids = students[["user_id"]].copy()
 
+    if audio.empty:
+        user_ids["audio_listened_count"] = 0.0
+        user_ids["audio_completion_rate"] = 0.0
+        return user_ids
+
+    audio = audio.copy()
+    audio["listened_at"] = pd.to_datetime(audio["listened_at"])
+    audio = audio[audio["listened_at"] < ref]   # temporal cut
     if audio.empty:
         user_ids["audio_listened_count"] = 0.0
         user_ids["audio_completion_rate"] = 0.0
@@ -313,15 +371,52 @@ def build_account_features(students: pd.DataFrame, ref_date: datetime) -> pd.Dat
 
 
 # ---------------------------------------------------------------------------
-# COMBINE — merge all feature groups + create the label
+# FORWARD LABEL — look into the future relative to ref_date
 # ---------------------------------------------------------------------------
-def build_feature_matrix(raw_data: dict, ref_date: datetime = None) -> pd.DataFrame:
+def compute_forward_label(students: pd.DataFrame, streaks: pd.DataFrame,
+                          ref_date: datetime, window_days: int = DROPOUT_DAYS_THRESHOLD) -> pd.DataFrame:
     """
-    Build the complete feature matrix.
+    is_dropout = 1 if the student had ZERO activity in the window
+    (ref_date, ref_date + window_days], else 0.
 
-    Each row = one student.
-    Each column = one engineered feature.
-    Last column = is_dropout (the label we're predicting).
+    This is the ONLY place we look at data after ref_date. Features look
+    strictly backward, the label looks strictly forward — that's the whole
+    point of the temporal split.
+    """
+    ref = pd.Timestamp(ref_date)
+    window_end = ref + timedelta(days=window_days)
+
+    result = students[["user_id"]].copy()
+
+    if streaks.empty:
+        result["is_dropout"] = 1
+        return result
+
+    s = streaks.copy()
+    s["activity_date"] = pd.to_datetime(s["activity_date"])
+    future = s[(s["activity_date"] >= ref) & (s["activity_date"] < window_end)]
+    active_users = set(future["user_id"].unique())
+
+    result["is_dropout"] = (~result["user_id"].isin(active_users)).astype(int)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# COMBINE — merge all feature groups + attach the label
+# ---------------------------------------------------------------------------
+def build_feature_matrix(raw_data: dict, ref_date: datetime = None,
+                         label_window_days: int = DROPOUT_DAYS_THRESHOLD,
+                         compute_label: bool = True) -> pd.DataFrame:
+    """
+    Build the complete feature matrix with a temporal split.
+
+    - `ref_date`        : cut-off time. Features use data strictly BEFORE this.
+    - `label_window_days`: size of the forward window for the label.
+    - `compute_label`    : set False at inference time (no future data yet).
+
+    Each row = one student; columns = engineered features; `is_dropout`
+    is the label (only meaningful when compute_label=True AND there's
+    enough future data past ref_date).
     """
     if ref_date is None:
         ref_date = datetime.utcnow()
@@ -329,25 +424,39 @@ def build_feature_matrix(raw_data: dict, ref_date: datetime = None) -> pd.DataFr
     students = raw_data["students"]
     counts = raw_data["content_counts"]
 
-    activity = build_activity_features(students, raw_data["streaks"], ref_date)
-    quiz = build_quiz_features(students, raw_data["quizzes"])
-    vocab = build_vocabulary_features(students, raw_data["words"], counts["total_vocabulary"])
-    writing = build_writing_features(students, raw_data["writing"])
-    audio = build_audio_features(students, raw_data["audio"], counts["total_audio"])
-    account = build_account_features(students, ref_date)
+    # Only students whose account existed as of ref_date
+    students_df = students.copy()
+    students_df["account_created"] = pd.to_datetime(students_df["account_created"])
+    students_df = students_df[students_df["account_created"] < pd.Timestamp(ref_date)]
+
+    activity = build_activity_features(students_df, raw_data["streaks"], ref_date)
+    quiz = build_quiz_features(students_df, raw_data["quizzes"], ref_date)
+    vocab = build_vocabulary_features(students_df, raw_data["words"], counts["total_vocabulary"], ref_date)
+    writing = build_writing_features(students_df, raw_data["writing"], ref_date)
+    audio = build_audio_features(students_df, raw_data["audio"], counts["total_audio"], ref_date)
+    account = build_account_features(students_df, ref_date)
 
     features = activity
     for df in [quiz, vocab, writing, audio, account]:
         features = features.merge(df, on="user_id", how="left")
 
-    # THE LABEL: inactive 7+ days = dropout (1), otherwise active (0)
-    features["is_dropout"] = (features["days_since_last_activity"] >= DROPOUT_DAYS_THRESHOLD).astype(int)
+    if compute_label:
+        label = compute_forward_label(students_df, raw_data["streaks"], ref_date, label_window_days)
+        features = features.merge(label, on="user_id", how="left")
+    else:
+        features["is_dropout"] = 0   # placeholder; ignored at inference
 
     return features
 
 
 def get_feature_columns() -> list:
-    """The 32 features the model uses (excludes user_id and label)."""
+    """
+    The 32 features the model trains on (excludes user_id and label).
+
+    Under the TEMPORAL SPLIT, `days_since_last_activity` is measured AS OF
+    ref_date, while the label is measured AFTER ref_date — so the feature
+    is strongly predictive but no longer definitional. Safe to include.
+    """
     return [
         # Activity (9)
         "days_since_last_activity", "total_active_days",

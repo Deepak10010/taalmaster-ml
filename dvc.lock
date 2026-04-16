@@ -1,0 +1,76 @@
+schema: '2.0'
+stages:
+  extract:
+    cmd: python -m scripts.run_extract
+    deps:
+    - path: config.py
+      hash: md5
+      md5: db42c54c90529eb7d9cdb963f5fb64f7
+      size: 1170
+    - path: ingestion/data_extraction.py
+      hash: md5
+      md5: a3ddf89c587e3b10ef34e44a101e8775
+      size: 4008
+    - path: scripts/run_extract.py
+      hash: md5
+      md5: 4e9fbd3819b627581ea4fd7b47a9691e
+      size: 1424
+    outs:
+    - path: data/dvc/raw
+      hash: md5
+      md5: 1545b594868cb5db30fcf11353681808.dir
+      size: 919354
+      nfiles: 7
+  features:
+    cmd: python -m scripts.run_features
+    deps:
+    - path: data/dvc/raw
+      hash: md5
+      md5: 1545b594868cb5db30fcf11353681808.dir
+      size: 919354
+      nfiles: 7
+    - path: scripts/run_features.py
+      hash: md5
+      md5: ad3b9572ece62cd036ed3a7c9cad9f7e
+      size: 1832
+    - path: transformation/feature_engineering.py
+      hash: md5
+      md5: 2e90a64698bd4971c8491e4573599c48
+      size: 20387
+    params:
+      params.yaml:
+        features.ref_offset_days: 8
+        features.window_days: 3
+    outs:
+    - path: data/dvc/features.parquet
+      hash: md5
+      md5: 3b104b26fda747d1b868e23469a600cf
+      size: 143445
+  train:
+    cmd: python -m scripts.run_train
+    deps:
+    - path: data/dvc/features.parquet
+      hash: md5
+      md5: 3b104b26fda747d1b868e23469a600cf
+      size: 143445
+    - path: scripts/run_train.py
+      hash: md5
+      md5: 3e904994ced02fa40e5fa535df328758
+      size: 2049
+    - path: training/train.py
+      hash: md5
+      md5: d2d8b6da3cfe2c3d65988d2c8ab085b0
+      size: 16078
+    outs:
+    - path: artifacts/dropout_model.joblib
+      hash: md5
+      md5: a4b903613784a81878bdd787ffaa8787
+      size: 287650
+    - path: artifacts/feature_columns.joblib
+      hash: md5
+      md5: b94191726b88ec40c23d8159ff899601
+      size: 684
+    - path: metrics.json
+      hash: md5
+      md5: bba0f738ee9318adff42ec47ad7036df
+      size: 364

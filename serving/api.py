@@ -15,12 +15,19 @@ WHY A SEPARATE SERVICE?
   - Clean separation of concerns
 
 Usage:
-    uvicorn api:app --host 0.0.0.0 --port 8000 --reload
+    uvicorn serving.api:app --host 0.0.0.0 --port 8000 --reload
+
+MODEL SOURCE:
+    At startup (first request) the API loads whatever version is tagged
+    "Production" in the MLflow registry. Re-registering a new Production
+    version is picked up on the next API restart.
 """
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime
+
+from inference.predict import current_model_version, current_model_source
 
 app = FastAPI(
     title="TaalMaster ML API",
@@ -102,13 +109,21 @@ def root():
 
 @app.get("/health")
 def health_check():
-    from config import MODEL_PATH
-    model_exists = MODEL_PATH.exists()
-    return {
-        "status": "healthy" if model_exists else "model_not_found",
-        "model_loaded": model_exists,
-        "timestamp": datetime.utcnow().isoformat(),
-    }
+    try:
+        version = current_model_version()
+        source = current_model_source()
+        return {
+            "status": "healthy",
+            "model_version": version,
+            "model_source": source,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+    except Exception as exc:
+        return {
+            "status": "model_not_loaded",
+            "error": str(exc),
+            "timestamp": datetime.utcnow().isoformat(),
+        }
 
 
 @app.get("/predictions", response_model=PredictionResponse)
@@ -117,15 +132,14 @@ def get_predictions(
     limit: int = Query(100, ge=1, le=500),
 ):
     """Get dropout risk predictions for all students."""
-    from config import MODEL_PATH
-    if not MODEL_PATH.exists():
-        raise HTTPException(status_code=503, detail="Model not trained yet. Run: python train.py")
+    from ingestion.data_extraction import extract_all
+    from inference.predict import predict_all_students
 
-    from data_extraction import extract_all
-    from predict import predict_all_students
-
-    raw_data = extract_all()
-    predictions = predict_all_students(raw_data)
+    try:
+        raw_data = extract_all()
+        predictions = predict_all_students(raw_data)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=f"Model unavailable: {exc}")
 
     if risk_level:
         predictions = [p for p in predictions if p["risk_level"] == risk_level]
@@ -142,7 +156,7 @@ def get_predictions(
         high_risk_count=high,
         medium_risk_count=medium,
         low_risk_count=low,
-        model_version="xgboost-v1",
+        model_version=current_model_version(),
         generated_at=datetime.utcnow().isoformat(),
     )
 
@@ -150,15 +164,14 @@ def get_predictions(
 @app.get("/predictions/{user_id}", response_model=StudentPrediction)
 def get_student_prediction(user_id: int):
     """Get dropout risk prediction for a single student."""
-    from config import MODEL_PATH
-    if not MODEL_PATH.exists():
-        raise HTTPException(status_code=503, detail="Model not trained yet. Run: python train.py")
+    from ingestion.data_extraction import extract_all
+    from inference.predict import predict_single_student
 
-    from data_extraction import extract_all
-    from predict import predict_single_student
-
-    raw_data = extract_all()
-    prediction = predict_single_student(raw_data, user_id)
+    try:
+        raw_data = extract_all()
+        prediction = predict_single_student(raw_data, user_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=f"Model unavailable: {exc}")
 
     if not prediction:
         raise HTTPException(status_code=404, detail=f"Student {user_id} not found")
@@ -169,15 +182,14 @@ def get_student_prediction(user_id: int):
 @app.get("/summary", response_model=SummaryResponse)
 def get_summary():
     """Aggregate risk overview for the admin dashboard."""
-    from config import MODEL_PATH
-    if not MODEL_PATH.exists():
-        raise HTTPException(status_code=503, detail="Model not trained yet. Run: python train.py")
+    from ingestion.data_extraction import extract_all
+    from inference.predict import predict_all_students
 
-    from data_extraction import extract_all
-    from predict import predict_all_students
-
-    raw_data = extract_all()
-    predictions = predict_all_students(raw_data)
+    try:
+        raw_data = extract_all()
+        predictions = predict_all_students(raw_data)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=f"Model unavailable: {exc}")
 
     factor_counts: dict[str, int] = {}
     for p in predictions:

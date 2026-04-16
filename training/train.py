@@ -50,7 +50,7 @@ from config import (
     MLFLOW_TRACKING_URI, MLFLOW_EXPERIMENT,
     MODEL_PATH, FEATURE_COLS_PATH, DROPOUT_DAYS_THRESHOLD,
 )
-from feature_engineering import build_feature_matrix, get_feature_columns
+from transformation.feature_engineering import build_feature_matrix, get_feature_columns
 
 
 def generate_synthetic_data(n_students: int = 200) -> dict:
@@ -340,7 +340,7 @@ def main():
         raw_data = generate_synthetic_data(args.synthetic)
     else:
         print("\n[1/3] Extracting data from Neon DB...")
-        from data_extraction import extract_all
+        from ingestion.data_extraction import extract_all
         raw_data = extract_all()
 
     print(f"  Students: {len(raw_data['students'])}")

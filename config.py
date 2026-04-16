@@ -15,6 +15,8 @@ if not DATABASE_URL:
 # MLflow stores experiment runs locally in ./mlruns
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns")
 MLFLOW_EXPERIMENT = "taalmaster-dropout-prediction"
+# The model registry entry that the API serves from.
+REGISTERED_MODEL_NAME = "taalmaster-dropout"
 
 # Trained model artifacts
 MODEL_DIR = Path(__file__).resolve().parent / "artifacts"

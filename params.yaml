@@ -1,0 +1,9 @@
+# DVC-tracked pipeline parameters.
+# Change any value here and `dvc repro` will re-run the stages that depend on it.
+features:
+  # ref_date = now - ref_offset_days  (must be > window_days + 1 so the label
+  # window falls entirely in the observed past)
+  ref_offset_days: 8
+  # Label: student is "dropout" if they had zero activity in this many days
+  # after ref_date. Same semantics as DROPOUT_DAYS_THRESHOLD in config.py.
+  window_days: 3

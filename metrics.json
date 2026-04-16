@@ -1,0 +1,11 @@
+{
+  "cv_f1_mean": 0.925399143460537,
+  "cv_f1_std": 0.01866176038460087,
+  "cv_roc_auc_mean": 0.9666628180772217,
+  "cv_precision_mean": 0.9716537937136722,
+  "cv_recall_mean": 0.8837163192679206,
+  "cv_accuracy_mean": 0.9153814880065049,
+  "n_students": 2352,
+  "dropout_rate": 0.5960884353741497,
+  "mlflow_run_id": "c1e4d177e185401ebb27e1e7fdebafd5"
+}

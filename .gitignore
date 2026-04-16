@@ -5,3 +5,8 @@ mlruns/
 artifacts/
 *.joblib
 .venv/
+
+# DVC-tracked outputs: DVC manages these (the .dvc pointers are what git tracks)
+data/
+logs/
+
