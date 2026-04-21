@@ -1,0 +1,62 @@
+# Never bake these into the image.
+# Code lives in the image; everything below is either dev-only, scratch
+# state, secrets, or data that belongs in a volume.
+
+# Virtual envs and caches
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# Secrets + local config
+.env
+.env.local
+
+# Dev / training artifacts that don't belong in a slim runtime image.
+# Mount these as volumes if the container needs them.
+mlruns/
+artifacts/
+data/
+logs/
+
+# DVC internals (the runtime image doesn't need DVC)
+.dvc/
+.dvcignore
+
+# Git + CI
+.git/
+.github/
+.gitignore
+
+# Tests + dev tooling
+tests/
+pytest.ini
+compare_models.py
+# ^ the comparison script pulls pandas + sklearn into training paths
+#   that aren't needed at serving time.
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed inside the image)
+README.md
+INSTRUCTIONS.md
+RELEASE_NOTES.md
+
+# The orchestrator + the DVC scripts are for training, not serving.
+pipeline.py
+run_scheduled.bat
+scripts/
+evaluation/
+training/
+dvc.yaml
+dvc.lock
+params.yaml
+metrics.json

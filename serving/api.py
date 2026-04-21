@@ -22,12 +22,18 @@ MODEL SOURCE:
     "Production" in the MLflow registry. Re-registering a new Production
     version is picked up on the next API restart.
 """
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime
 
 from inference.predict import current_model_version, current_model_source
+from inference.prediction_logger import (
+    ensure_log_table_exists,
+    log_prediction,
+    log_predictions_batch,
+)
+from serving.prediction_cache import get_predictions_for_serving, cache_info
 
 app = FastAPI(
     title="TaalMaster ML API",
@@ -41,6 +47,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def _create_log_table_on_boot():
+    """Ensure ml_prediction_log exists before the first request lands."""
+    ensure_log_table_exists()
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +89,14 @@ class PredictionResponse(BaseModel):
     low_risk_count: int
     model_version: str
     generated_at: str
+    # "cache" = served from the most recent predictions JSON (daily pipeline).
+    # "live" = full recompute on this request.
+    source: str = "live"
+
+
+class DropoutRiskRequest(BaseModel):
+    """Body for POST /predict/dropout-risk (the diagram's canonical name)."""
+    user_id: int
 
 
 class SummaryResponse(BaseModel):
@@ -87,6 +107,7 @@ class SummaryResponse(BaseModel):
     avg_dropout_probability: float
     top_risk_factors: list[dict]
     generated_at: str
+    source: str = "live"
 
 
 # ---------------------------------------------------------------------------
@@ -128,16 +149,19 @@ def health_check():
 
 @app.get("/predictions", response_model=PredictionResponse)
 def get_predictions(
+    background_tasks: BackgroundTasks,
     risk_level: str | None = Query(None, description="Filter: high, medium, low"),
     limit: int = Query(100, ge=1, le=500),
+    fresh: bool = Query(False, description="Skip cache and force a live recompute"),
 ):
-    """Get dropout risk predictions for all students."""
-    from ingestion.data_extraction import extract_all
-    from inference.predict import predict_all_students
+    """Get dropout risk predictions for all students.
 
+    By default served from the latest daily snapshot (fast). Pass
+    `?fresh=true` to force a live recompute (slow, ~30s) when you need
+    up-to-the-minute numbers.
+    """
     try:
-        raw_data = extract_all()
-        predictions = predict_all_students(raw_data)
+        predictions, source = get_predictions_for_serving(force_fresh=fresh)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=f"Model unavailable: {exc}")
 
@@ -150,6 +174,11 @@ def get_predictions(
     medium = sum(1 for p in predictions if p["risk_level"] == "medium")
     low = sum(1 for p in predictions if p["risk_level"] == "low")
 
+    # Log AFTER response is sent — doesn't block the request.
+    background_tasks.add_task(
+        log_predictions_batch, predictions, current_model_version(), source, "/predictions",
+    )
+
     return PredictionResponse(
         predictions=[StudentPrediction(**p) for p in predictions],
         total_students=len(predictions),
@@ -158,36 +187,52 @@ def get_predictions(
         low_risk_count=low,
         model_version=current_model_version(),
         generated_at=datetime.utcnow().isoformat(),
+        source=source,
     )
 
 
 @app.get("/predictions/{user_id}", response_model=StudentPrediction)
-def get_student_prediction(user_id: int):
-    """Get dropout risk prediction for a single student."""
-    from ingestion.data_extraction import extract_all
-    from inference.predict import predict_single_student
+def get_student_prediction(
+    user_id: int,
+    background_tasks: BackgroundTasks,
+    fresh: bool = Query(False),
+):
+    """Get dropout risk prediction for a single student.
 
+    Also cache-first. Single-student lookups walk the cached list, so they
+    inherit the same freshness as /predictions.
+    """
     try:
-        raw_data = extract_all()
-        prediction = predict_single_student(raw_data, user_id)
+        predictions, source = get_predictions_for_serving(force_fresh=fresh)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=f"Model unavailable: {exc}")
 
-    if not prediction:
+    match = next((p for p in predictions if p.get("user_id") == user_id), None)
+    if not match:
         raise HTTPException(status_code=404, detail=f"Student {user_id} not found")
 
-    return StudentPrediction(**prediction)
+    background_tasks.add_task(
+        log_prediction, match, current_model_version(), source, "/predictions/{user_id}",
+    )
+
+    return StudentPrediction(**match)
+
+
+# Canonical inference endpoint as drawn in the architecture diagram.
+# Same handler as GET /predictions/{user_id}; the POST form is the one a
+# third-party system (non-browser) would call. Kept as an alias for naming
+# parity with the diagram — not used by the React admin dashboard, which
+# uses the GET form via the Express proxy.
+@app.post("/predict/dropout-risk", response_model=StudentPrediction)
+def predict_dropout_risk(request: DropoutRiskRequest, background_tasks: BackgroundTasks):
+    return get_student_prediction(request.user_id, background_tasks)
 
 
 @app.get("/summary", response_model=SummaryResponse)
-def get_summary():
+def get_summary(fresh: bool = Query(False, description="Skip cache and recompute")):
     """Aggregate risk overview for the admin dashboard."""
-    from ingestion.data_extraction import extract_all
-    from inference.predict import predict_all_students
-
     try:
-        raw_data = extract_all()
-        predictions = predict_all_students(raw_data)
+        predictions, source = get_predictions_for_serving(force_fresh=fresh)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=f"Model unavailable: {exc}")
 
@@ -212,4 +257,5 @@ def get_summary():
         ),
         top_risk_factors=top_factors,
         generated_at=datetime.utcnow().isoformat(),
+        source=source,
     )

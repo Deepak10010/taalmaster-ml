@@ -106,7 +106,7 @@ def generate_synthetic_data(n_students: int = 200) -> dict:
             "account_created": created, "trial_ends_at": created + timedelta(days=3),
             "subscription_status": sub_status,
             "stripe_price_id": rng.choice(["price_monthly", "price_6month", "price_yearly"]) if sub_status else None,
-            "subscription_expires": (now + timedelta(days=rng.integers(1, 60))) if sub_status in ["active", "trialing"] else None,
+            "subscription_expires": (now + timedelta(days=int(rng.integers(1, 60)))) if sub_status in ["active", "trialing"] else None,
             "cancel_at_period_end": cancel if sub_status else None,
         })
 
@@ -143,7 +143,7 @@ def generate_synthetic_data(n_students: int = 200) -> dict:
                 "user_id": uid, "section_id": rng.integers(1, 16),
                 "mode": rng.choice(["flashcard", "multiple_choice", "fill_blank", "translation"]),
                 "score": score, "total_questions": total_q,
-                "completed_at": created + timedelta(days=rng.integers(0, account_age)),
+                "completed_at": created + timedelta(days=int(rng.integers(0, account_age))),
             })
 
         # Word progress
@@ -161,7 +161,7 @@ def generate_synthetic_data(n_students: int = 200) -> dict:
             word_records.append({
                 "user_id": uid, "vocabulary_id": rng.integers(1, 255),
                 "status": status, "attempts": att, "correct_attempts": corr,
-                "last_seen": created + timedelta(days=rng.integers(0, account_age)),
+                "last_seen": created + timedelta(days=int(rng.integers(0, account_age))),
             })
 
         # Writing
@@ -176,7 +176,7 @@ def generate_synthetic_data(n_students: int = 200) -> dict:
             writing_records.append({
                 "user_id": uid, "prompt_id": rng.integers(1, 31),
                 "score": min(10, max(1, int(base_ws + rng.normal(0, 1.5)))),
-                "submitted_at": created + timedelta(days=rng.integers(0, account_age)),
+                "submitted_at": created + timedelta(days=int(rng.integers(0, account_age))),
             })
 
         # Audio
@@ -184,7 +184,7 @@ def generate_synthetic_data(n_students: int = 200) -> dict:
         for _ in range(n_a):
             audio_records.append({
                 "user_id": uid, "audio_id": rng.integers(1, 32),
-                "listened": True, "listened_at": created + timedelta(days=rng.integers(0, account_age)),
+                "listened": True, "listened_at": created + timedelta(days=int(rng.integers(0, account_age))),
             })
 
     return {

@@ -1,0 +1,32 @@
+# Local dev / testing convenience. Run:
+#     docker compose up --build
+# Then hit http://localhost:8000/docs for Swagger.
+#
+# Mounts mlruns/, artifacts/, data/ from the host so the container uses
+# whatever was produced by your most recent `python pipeline.py` run.
+# When you promote a new model in the registry, `docker compose restart`
+# picks it up.
+
+services:
+  ml-api:
+    build: .
+    image: taalmaster-ml:local
+    container_name: taalmaster-ml
+    ports:
+      - "8000:8000"
+    environment:
+      # Pulls DATABASE_URL from the host's .env file at runtime.
+      DATABASE_URL: ${DATABASE_URL}
+      # Cache freshness (minutes). Default 24h, override per environment.
+      PREDICTION_CACHE_MAX_AGE_MINUTES: ${PREDICTION_CACHE_MAX_AGE_MINUTES:-1440}
+      # Local file-backed MLflow. Switch to http://mlflow-server:5000 if
+      # you add an MLflow service to this compose file.
+      MLFLOW_TRACKING_URI: file:/app/mlruns
+    volumes:
+      # These directories are produced by pipeline.py on the HOST machine.
+      # The container reads from them — so the scheduled training on your
+      # laptop and the serving container always see the same model state.
+      - ./mlruns:/app/mlruns
+      - ./artifacts:/app/artifacts
+      - ./data:/app/data
+    restart: unless-stopped

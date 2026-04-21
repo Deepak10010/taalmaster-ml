@@ -7,6 +7,83 @@ and DVC fit in, how to run every piece, and lessons learned along the way.
 If you want the 3-minute overview, read [README.md](README.md). If you want to
 understand why everything is the way it is, read this.
 
+If you've never seen an ML project before, skim the [In Plain English](#in-plain-english)
+section below first — it explains what the whole thing does in everyday language.
+
+---
+
+## In Plain English
+
+Before diving into the technical sections, here is what the project actually does,
+with no ML jargon, the way you'd explain it to a family member over dinner.
+
+### The problem
+
+TaalMaster is a Dutch-learning app. Some students use it for a while and then
+quietly disappear — they stop opening the app, stop doing quizzes, and eventually
+cancel. That's bad for the business and sad for the student (they came to learn
+Dutch and didn't).
+
+**This project tries to spot the students who are about to disappear, while
+there's still time to do something about it.**
+
+Like a weather forecast. We can't be certain it'll rain, but if the signs are
+bad enough, you grab an umbrella.
+
+### How it works, imagined as a friendly assistant
+
+Picture an assistant at a desk every morning at 10am:
+
+1. **Reads the app's diary.** Who logged in? Who did quizzes? Who submitted
+   writing? Who has been quiet lately?
+
+2. **Writes a report card** for each student — 32 lines like "hasn't logged in
+   for 8 days," "quiz scores are dropping," "trial expired last week but didn't
+   subscribe."
+
+3. **Learns patterns from the past.** Shows a computer every student who quit
+   in the past, plus everyone who stuck around, and asks: "what did the quitters
+   look like a week before they quit?" The computer figures out the pattern.
+
+4. **Scores today's students** against that pattern. Gives each one a number
+   from 0% ("fine") to 100% ("about to leave").
+
+5. **Tells the admin dashboard.** Shows a ranked list — the students most at
+   risk, a short explanation of why the computer thinks so, and a suggested
+   action ("send this student a re-engagement email").
+
+That's the whole job.
+
+### Why all the extra tools exist
+
+Everything else in this repo is a **support system** wrapped around that
+simple idea:
+
+| Tool in this repo | What it actually is | Why we need it |
+|---|---|---|
+| **MLflow** | A filing cabinet for predictors | Keeps every version we've made so we know which is currently serving and which worked best |
+| **DVC** | A safety deposit box for data + models | Lets us go back in time to exactly reproduce any past result |
+| **Windows Task Scheduler** | An alarm clock | Runs the assistant every morning without anyone pushing a button |
+| **Drift detection** | A smoke detector | Notices when student behavior suddenly changes in weird ways, so we know it's time to retrain |
+| **FastAPI + Express proxy** | A waiter | Carries the assistant's report from the computer to the admin's browser |
+| **Temporal split** | A fair-testing rule | Makes sure the assistant is genuinely *predicting* the future, not just *reading* the present |
+
+### The one-sentence version
+
+**This project predicts which students are about to give up on the app,
+explains why, and tells admins what to do about it. The rest of the repo
+is the plumbing that keeps it running reliably and reproducibly.**
+
+### Why this was interesting to build
+
+A naive version of this is trivial — just query the database for students
+inactive for 7 days, list them. No ML needed.
+
+The actually useful version catches people *before* they go silent, by
+spotting a combination of subtle signs (quiz scores drifting down, skipping
+writing, slowing engagement) that a human would probably miss. That's what
+the model learns to see, and that's what makes it worth the effort.
+
 ---
 
 ## Table of Contents
@@ -31,7 +108,8 @@ understand why everything is the way it is, read this.
 18. [Operational Playbook](#18-operational-playbook)
 19. [Troubleshooting](#19-troubleshooting)
 20. [Lessons Learned](#20-lessons-learned)
-21. [What's Not Done Yet](#21-whats-not-done-yet)
+21. [Admin Dashboard Integration (Taalmaster)](#21-admin-dashboard-integration-taalmaster)
+22. [What's Not Done Yet](#22-whats-not-done-yet)
 
 ---
 
@@ -634,6 +712,44 @@ python -m evaluation.backtest
 python -m evaluation.backtest --train-offset-days 28 --test-offset-days 14 --window-days 7
 ```
 
+### Drift detection — [evaluation/drift_check.py](evaluation/drift_check.py)
+
+Compares today's feature distributions against the most recent training
+snapshot and flags per-feature drift. This is the **"drift" half** of the
+"Scheduled / drift" retrain trigger in the architecture diagram.
+
+Method, per feature:
+- Continuous features → **Kolmogorov-Smirnov 2-sample test**
+- Binary (0/1) features → **chi-square test** on a 2×2 contingency table
+
+A feature is flagged as drifted when its p-value is below the threshold
+(default 0.01 — less than 1% chance the distributions are the same).
+
+```bash
+python -m evaluation.drift_check                    # report + log to MLflow
+python -m evaluation.drift_check --threshold 0.05   # looser significance
+python -m evaluation.drift_check --fail-on-drift    # exit 1 if any drift
+python -m evaluation.drift_check --no-mlflow        # skip MLflow logging
+```
+
+**Output** — an ASCII table of drifted features with p-value, reference
+mean, current mean, and percent delta. Plus a full JSON report uploaded to
+MLflow under the tag `purpose=drift_check`.
+
+**Cron chaining** — retrain only when drift is detected:
+
+```bash
+python -m evaluation.drift_check --fail-on-drift \
+    || python pipeline.py
+```
+
+**Expected behavior** — some drift is normal even in a healthy product.
+`days_since_last_activity`, recent-activity windows, and `account_age_days`
+will always shift if the reference snapshot is more than a few days old,
+because those features encode *calendar* time. A sudden shift in
+`is_trial_expired` or `has_subscription` rates is a stronger signal that
+something operationally changed (campaign, price change, cohort shift).
+
 ---
 
 ## 11. Stage 4 — Prediction & Explainability
@@ -722,6 +838,7 @@ can consume them.
 | GET | `/summary` | Aggregate risk stats for the dashboard |
 | GET | `/predictions` | All students, ranked by risk |
 | GET | `/predictions/{user_id}` | One student's risk breakdown |
+| POST | `/predict/dropout-risk` | Same payload as GET /predictions/{id}; body `{"user_id": N}` — canonical name from the architecture diagram |
 | GET | `/docs` | Interactive Swagger UI |
 
 ### Example response — /health
@@ -1133,6 +1250,8 @@ python -m training.train                    # train only (skips extraction)
 python -m training.train --synthetic 500    # train on 500 fake students
 python -m training.compare_models           # LR vs RF vs XGBoost
 python -m evaluation.backtest               # temporal holdout check
+python -m evaluation.drift_check            # feature drift report (logs to MLflow)
+python -m evaluation.drift_check --fail-on-drift   # exit 1 if any feature drifted
 python -m ingestion.seed_students           # seed 2500 fake students
 python -m ingestion.seed_students --count 500
 python -m scripts.run_extract               # DVC extract step alone
@@ -1396,22 +1515,229 @@ faster to create and slower to understand.
 
 ---
 
-## 21. What's Not Done Yet
+## 21. Admin Dashboard Integration (Taalmaster)
+
+The ML service is consumed by the main Taalmaster admin dashboard at
+`c:\Users\dlokanath\taalmaster\`. This section documents exactly what was
+wired up across the two repos so you can reproduce, maintain, or deploy it.
+
+### 21.1 Architecture of the integration
+
+```
+┌───────────────────────┐    ┌──────────────────────┐    ┌──────────────────────┐
+│  React admin panel    │    │  Express server      │    │  FastAPI (this repo) │
+│  (client/ — Vite)     │───▶│  (server/src)        │───▶│  (serving/api.py)    │
+│  port 3000 / 5173     │    │  port 5000           │    │  port 8000           │
+│  axios → /api/ml/...  │    │  authenticate +      │    │  loads Production    │
+│                       │    │  requireAdmin gate   │    │  model from MLflow   │
+└───────────────────────┘    │  proxies /api/ml/*   │    │  registry            │
+                             │  → ML_API_URL        │    └──────────────────────┘
+                             └──────────────────────┘
+```
+
+**Why a proxy and not direct browser → FastAPI?**
+
+1. **Single origin from the browser's side.** No CORS headaches.
+2. **Reuses the existing JWT auth + admin gate**, so the ML endpoints can't
+   be hit anonymously. Without this, anyone who found the FastAPI URL could
+   scrape per-student predictions.
+3. **Keeps the ML service URL server-side.** Admins see `/api/ml/...`, not
+   the actual FastAPI address.
+
+### 21.2 Files added or changed
+
+Three new files, two edits. All living in `c:\Users\dlokanath\taalmaster\`:
+
+| Location | What | Purpose |
+|---|---|---|
+| `server/src/routes/ml.js` | **NEW** | Express proxy routes with admin gate |
+| `server/src/index.js` | edit | Mount the new router at `/api/ml` |
+| `server/.env` | edit | Add `ML_API_URL=http://localhost:8000` |
+| `client/src/components/admin/DropoutRiskManager.jsx` | **NEW** | Summary + table + detail modal |
+| `client/src/components/admin/AdminPanel.jsx` | edit | Register the "Dropout Risk" tab |
+
+### 21.3 The Express proxy — [server/src/routes/ml.js](../taalmaster/server/src/routes/ml.js)
+
+Four routes, all behind `authenticate + requireAdmin`:
+
+| Method | Path | Forwards to FastAPI |
+|---|---|---|
+| GET | `/api/ml/summary` | `/summary` |
+| GET | `/api/ml/predictions` | `/predictions` (query params passed through) |
+| GET | `/api/ml/predictions/:userId` | `/predictions/{userId}` |
+| GET | `/api/ml/health` | `/health` |
+
+Implementation uses Node 18+ native `fetch` — no new dependency added to
+`package.json`. Timeout is 60 seconds (the ML API extracts from Neon and
+scores 2,500 students per request, which can take 20–30 seconds).
+
+Error responses:
+- **502** when the FastAPI is unreachable
+- **504** when the request exceeds 60 seconds
+- **4xx** passed through transparently from the FastAPI
+
+### 21.4 Mounting the proxy — `server/src/index.js`
+
+Two lines added (alongside the other route modules):
+
+```js
+const mlRoutes = require('./routes/ml');
+// ... later:
+app.use('/api/ml', mlRoutes);
+```
+
+Auth is already enforced inside `ml.js`, so no extra middleware wrapping is
+needed here.
+
+### 21.5 Environment variable
+
+Added to `server/.env`:
+
+```
+ML_API_URL=http://localhost:8000
+```
+
+When deploying the server, set `ML_API_URL` to wherever the FastAPI lives in
+production (e.g. a Render service URL). The React side doesn't need changes —
+it always hits the same-origin `/api/ml/*`.
+
+**Render / cloud deployment note**: add `ML_API_URL` to the `render.yaml`
+envVars list with `sync: false` so you can set it per-environment without
+committing secrets.
+
+### 21.6 The React component — [DropoutRiskManager.jsx](../taalmaster/client/src/components/admin/DropoutRiskManager.jsx)
+
+Visible UI elements:
+
+1. **Header** — shows the currently serving model version (pulled from
+   `/api/ml/health`, e.g. `taalmaster-dropout v4`). A Refresh button.
+2. **Summary cards** (top row) — total students, high/medium/low counts.
+   Data from `/api/ml/summary`.
+3. **Risk-level tabs** — High / Medium / Low. Default: High.
+4. **Students table** — name, email, dropout probability (as a colored
+   badge), days inactive, subscription status, top risk factor message.
+   Rows clickable.
+5. **Detail modal** (on row click) — student name, probability, recommended
+   action, context stats (streak, quizzes, words mastered, subscription),
+   ranked list of risk factors with severity scores.
+
+Follows the existing admin component patterns:
+- Uses the shared `utils/api.js` axios instance (gets JWT auth + base URL for free)
+- Tailwind classes matching other admin components (`bg-dutch-blue`, dark: variants)
+- `react-hot-toast` for error notifications
+- `react-icons/fi` for iconography
+
+### 21.7 Registering the tab — `AdminPanel.jsx`
+
+One import and one tab entry added:
+
+```jsx
+import DropoutRiskManager from './DropoutRiskManager';
+
+const tabs = [
+  // ... existing tabs ...
+  { id: 'dropout', label: 'Dropout Risk' },
+];
+```
+
+Plus one line to render the component when active:
+
+```jsx
+{activeTab === 'dropout' && <DropoutRiskManager />}
+```
+
+### 21.8 Running the full stack locally
+
+Three terminals. The order doesn't matter but all three must be running to
+see anything in the browser:
+
+```bash
+# Terminal 1 — ML service
+cd c:\Users\dlokanath\taalmaster-ml
+uvicorn serving.api:app --port 8000
+
+# Terminal 2 — Express backend
+cd c:\Users\dlokanath\taalmaster\server
+npm run dev
+
+# Terminal 3 — React dev server
+cd c:\Users\dlokanath\taalmaster\client
+npm run dev
+```
+
+Then:
+
+1. Open the client URL (usually http://localhost:5173 for Vite or
+   http://localhost:3000 depending on config).
+2. Log in as an **admin** user (the middleware checks `req.user.role === 'admin'`).
+3. Navigate to the Admin Panel.
+4. Click the **Dropout Risk** tab.
+
+First load takes ~25 seconds — the FastAPI is re-running `extract_all()` +
+`predict_all_students()` for 2,503 students on each request. Subsequent
+interactions (clicking rows, switching tabs) are instant.
+
+### 21.9 Known caveats and their fixes
+
+**Port 8000 already in use** — `[Errno 10048]`. A previous uvicorn didn't
+shut down cleanly. On Windows, `netstat -ano | findstr :8000` shows the PID;
+kill it with `taskkill /F /PID <pid>`. Or just use a different port and
+update `ML_API_URL`.
+
+**Every page load is slow** — the FastAPI re-extracts + re-predicts on every
+request. For a real deployment, either:
+- Cache the /summary response for N minutes server-side in FastAPI, or
+- Read predictions from the latest `data/predictions/*.json` file instead
+  of recomputing (whichever file was written by the most recent pipeline run).
+
+The daily scheduled pipeline already writes a fresh predictions JSON — the
+API just doesn't use it yet.
+
+**Model version doesn't update without API restart** — by design. The
+FastAPI caches the Production model at startup. If `pipeline.py` promotes
+a new version, restart `uvicorn` and it picks up the new one.
+
+**CORS errors in production** — shouldn't happen, because the browser only
+talks to the Express origin. If you see them anyway, something upstream is
+bypassing the proxy. Check `VITE_API_URL` in the client's `.env` — if it
+points straight at the FastAPI, it's wrong.
+
+### 21.10 Security review
+
+The integration respects the following constraints:
+
+- **Auth**: admin-only, enforced at the Express layer via the same JWT
+  middleware that protects other admin routes.
+- **Secrets**: `ML_API_URL` is server-side only. Never shipped to the
+  browser.
+- **No direct DB access**: the admin UI never touches Neon directly — it
+  always goes through the ML API, which uses read-only queries.
+- **No user-controlled inputs reach SQL**: `:userId` is passed to FastAPI
+  via URL; FastAPI uses parameterized queries (via SQLAlchemy `text()`).
+- **No raw model outputs in JS**: the model probabilities, risk factors,
+  and recommendations are pre-computed server-side. The client just renders.
+
+### 21.11 Deploying to production
+
+Minimal steps:
+
+1. **Deploy the FastAPI** (Render, Fly, a VPS). Python 3.12, `pip install -r
+   requirements.txt`, start command
+   `uvicorn serving.api:app --host 0.0.0.0 --port $PORT`.
+   Env vars: `DATABASE_URL`, optionally `MLFLOW_TRACKING_URI`.
+2. **Ship `mlruns/` with the container** (simple) or point to a remote
+   MLflow server (proper). Without one of these, the registry will be empty
+   and the API will fall back to the local joblib file.
+3. **Set `ML_API_URL`** on the Render Taalmaster server to the deployed
+   FastAPI URL.
+4. **Done.** No React changes needed — the admin dashboard already hits
+   `/api/ml/*` via the proxy.
+
+---
+
+## 22. What's Not Done Yet
 
 Things that are on the roadmap but not built:
-
-### Admin dashboard integration
-
-The main Taalmaster repo needs:
-- An Express proxy route (`/api/ml/*` → this FastAPI)
-- A React component showing the dropout risk table
-- Auth passthrough so only admins can see it
-
-### Drift detection
-
-Monitor feature distributions over time. If the dropout rate, mean
-`activity_trend`, etc., shift significantly from the training distribution,
-trigger a retrain.
 
 ### Tests
 
