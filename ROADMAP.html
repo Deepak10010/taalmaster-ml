@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Taalmaster — Learning Roadmap</title>
+<style>
+  :root {
+    --ink:        #1f2937;
+    --ink-muted:  #6b7280;
+    --ink-label:  #374151;
+    --card-radius: 14px;
+    --card-shadow: 0 2px 8px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.04);
+    --card-shadow-hover: 0 8px 20px rgba(0,0,0,0.10), 0 2px 6px rgba(0,0,0,0.06);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 48px 24px 80px 24px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--ink);
+    background:
+      radial-gradient(ellipse at top, #f8fafc 0%, transparent 60%),
+      radial-gradient(ellipse at bottom, #fafafa 0%, #f3f4f6 100%);
+    min-height: 100vh;
+  }
+
+  header {
+    max-width: 720px;
+    margin: 0 auto 40px auto;
+    text-align: center;
+  }
+  header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 0 0 8px 0;
+    letter-spacing: -0.02em;
+  }
+  header p {
+    font-size: 14px;
+    color: var(--ink-muted);
+    margin: 0;
+  }
+  header .legend {
+    margin-top: 20px;
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    color: var(--ink-label);
+  }
+  .legend .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: white;
+    border: 1px solid #e5e7eb;
+  }
+  .legend .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .dot-done  { background: #34a853; }
+  .dot-part  { background: #fbbc04; }
+  .dot-next  { background: #9ca3af; }
+
+  .timeline {
+    max-width: 720px;
+    margin: 0 auto;
+    position: relative;
+  }
+
+  .phase {
+    position: relative;
+    border-radius: var(--card-radius);
+    padding: 18px 22px;
+    margin-bottom: 14px;
+    box-shadow: var(--card-shadow);
+    border: 1px solid rgba(0,0,0,0.04);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    cursor: default;
+  }
+  .phase:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--card-shadow-hover);
+  }
+
+  .phase-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .phase-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .phase-title .status {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  .status.done { background: #d4edda; color: #157347; }
+  .status.part { background: #fff3cd; color: #8a6d3b; }
+  .status.next { background: #e5e7eb; color: #4b5563; }
+
+  .phase-desc {
+    font-size: 13px;
+    color: var(--ink-muted);
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+
+  .phase-icon {
+    font-size: 18px;
+    opacity: 0.85;
+  }
+
+  /* Arrow between cards */
+  .arrow {
+    display: block;
+    margin: -6px auto -6px auto;
+    text-align: center;
+    color: #cbd5e1;
+    font-size: 18px;
+    line-height: 1;
+    user-select: none;
+  }
+
+  /* Phase palette — matches the image's feel, one subtle tint per phase. */
+  .p1 { background: linear-gradient(180deg, #f1ede4 0%, #ebe6db 100%); }
+  .p2 { background: linear-gradient(180deg, #e4ecfa 0%, #dae5f7 100%); }
+  .p3 { background: linear-gradient(180deg, #ece5fa 0%, #e3d8f5 100%); }
+  .p4 { background: linear-gradient(180deg, #e2f0e8 0%, #d4e8de 100%); }
+  .p5 { background: linear-gradient(180deg, #d7ecea 0%, #c7e4e1 100%); }
+  .p6 { background: linear-gradient(180deg, #fcecd5 0%, #f8e0bf 100%); }
+  .p7 { background: linear-gradient(180deg, #fadada 0%, #f3c5c5 100%); }
+  .p8 { background: linear-gradient(180deg, #dbe4f6 0%, #c7d5ec 100%); }
+  .p9 { background: linear-gradient(180deg, #dfeadd 0%, #cee0cc 100%); }
+
+  .tags {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .tag {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.55);
+    border: 1px solid rgba(0,0,0,0.05);
+    color: var(--ink-label);
+  }
+
+  footer {
+    max-width: 720px;
+    margin: 40px auto 0 auto;
+    text-align: center;
+    font-size: 12px;
+    color: var(--ink-muted);
+  }
+
+  @media (max-width: 540px) {
+    .phase { padding: 14px 16px; }
+    .phase-title { font-size: 14px; }
+    .phase-desc  { font-size: 12px; }
+    header h1    { font-size: 22px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Taalmaster · Learning Roadmap</h1>
+  <p>Where the project stands and what comes next.</p>
+  <div class="legend">
+    <span class="pill"><span class="dot dot-done"></span> done</span>
+    <span class="pill"><span class="dot dot-part"></span> partial</span>
+    <span class="pill"><span class="dot dot-next"></span> next</span>
+  </div>
+</header>
+
+<div class="timeline">
+
+  <!-- PHASE 1 -->
+  <div class="phase p1">
+    <div class="phase-header">
+      <div class="phase-title">
+        Phase 1 — App foundation
+        <span class="status done">done</span>
+      </div>
+      <div class="phase-icon">🧱</div>
+    </div>
+    <div class="phase-desc">The base product: Express + Postgres + React admin, deployed on Render/Vercel.</div>
+    <div class="tags">
+      <span class="tag">Express API</span>
+      <span class="tag">Postgres on Neon</span>
+      <span class="tag">React client</span>
+      <span class="tag">JWT auth · Stripe</span>
+    </div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <!-- PHASE 2 -->
+  <div class="phase p2">
+    <div class="phase-header">
+      <div class="phase-title">
+        Phase 2 — ML + MLOps
+        <span class="status done">done</span>
+      </div>
+      <div class="phase-icon">🧠</div>
+    </div>
+    <div class="phase-desc">Dropout-prediction pipeline: extract → features → XGBoost → MLflow registry → FastAPI serving, with a temporal split against leakage.</div>
+    <div class="tags">
+      <span class="tag">XGBoost</span>
+      <span class="tag">MLflow tracking</span>
+      <span class="tag">Model registry</span>
+      <span class="tag">DVC</span>
+      <span class="tag">FastAPI</span>
+      <span class="tag">Backtest</span>
+    </div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <!-- PHASE 3 -->
+  <div class="phase p3">
+    <div class="phase-header">
+      <div class="phase-title">
+        Phase 3 — LLM + LLMOps
+        <span class="status next">next</span>
+      </div>
+      <div class="phase-icon">✨</div>
+    </div>
+    <div class="phase-desc">Layer an LLM on top — summarize a student's performance in plain Dutch feedback, answer admin questions about trends, version the prompts.</div>
+    <div class="tags">
+      <span class="tag">Performance summaries</span>
+      <span class="tag">RAG over student history</span>
+      <span class="tag">Prompt versioning</span>
+      <span class="tag">Evaluation harness</span>
+    </div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <!-- PHASE 4 -->
+  <div class="phase p4">
+    <div class="phase-header">
+      <div class="phase-title">
+        Phase 4 — Containerization
+        <span class="status part">partial</span>
+      </div>
+      <div class="phase-icon">📦</div>
+    </div>
+    <div class="phase-desc">Dockerfile + docker-compose written. Build and deploy are the next step (Render / Fly / self-hosted).</div>
+    <div class="tags">
+      <span class="tag">Dockerfile (multi-stage)</span>
+      <span class="tag">.dockerignore</span>
+      <span class="tag">docker-compose.yml</span>
+      <span class="tag">HEALTHCHECK</span>
+    </div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <!-- PHASE 5 -->
+  <div class="phase p5">
+    <div class="phase-header">
+      <div class="phase-title">
+        Phase 5 — Deployment (Kubernetes / PaaS)
+        <span class="status next">next</span>
+      </div>
+      <div class="phase-icon">⚙️</div>
+    </div>
+    <div class="phase-desc">Run the container somewhere durable. PaaS (Render/Fly) is the right first step; Kubernetes only when there are 3+ services to orchestrate.</div>
+    <div class="tags">
+      <span class="tag">Render / Fly.io</span>
+      <span class="tag">Auto-deploy from GitHub</span>
+      <span class="tag">Env secrets</span>
+      <span class="tag">Rolling updates</span>
+    </div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <!-- PHASE 6 -->
+  <div class="phase p6">
+    <div class="phase-header">
+      <div class="phase-title">
+        Phase 6 — Monitoring &amp; observability
+        <span class="status part">partial</span>
+      </div>
+      <div class="phase-icon">📊</div>
+    </div>
+    <div class="phase-desc">MLflow UI tracks every training run and model version. Prediction logs land in Neon. Still missing: uptime pings, error alerts, dashboards.</div>
+    <div class="tags">
+      <span class="tag">MLflow UI</span>
+      <span class="tag">ml_prediction_log table</span>
+      <span class="tag">→ Uptime Robot</span>
+      <span class="tag">→ Better Stack logs</span>
+      <span class="tag">→ Grafana dashboards</span>
+    </div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <!-- PHASE 7 -->
+  <div class="phase p7">
+    <div class="phase-header">
+      <div class="phase-title">
+        Phase 7 — Drift detection
+        <span class="status done">done</span>
+      </div>
+      <div class="phase-icon">🚨</div>
+    </div>
+    <div class="phase-desc">Per-feature KS &amp; chi-square tests flag when today's distribution differs from the last training snapshot. Logs to MLflow, returns a non-zero exit code so cron can chain with a retrain.</div>
+    <div class="tags">
+      <span class="tag">KS + chi-square</span>
+      <span class="tag">p-value threshold</span>
+      <span class="tag">evaluation/drift_check.py</span>
+      <span class="tag">--fail-on-drift</span>
+    </div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <!-- PHASE 8 -->
+  <div class="phase p8">
+    <div class="phase-header">
+      <div class="phase-title">
+        Phase 8 — Continuous retraining
+        <span class="status part">partial</span>
+      </div>
+      <div class="phase-icon">🔁</div>
+    </div>
+    <div class="phase-desc">Scheduled nightly retrain is live (Windows Task Scheduler → pipeline.py). Auto-promotion when CV F1 beats current Production. Still to add: canary releases, staging stage in the registry.</div>
+    <div class="tags">
+      <span class="tag">run_scheduled.bat (10am)</span>
+      <span class="tag">compare_models.py</span>
+      <span class="tag">MLflow auto-promotion</span>
+      <span class="tag">→ Staging → canary</span>
+    </div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <!-- PHASE 9 -->
+  <div class="phase p9">
+    <div class="phase-header">
+      <div class="phase-title">
+        Phase 9 — Governance &amp; trust
+        <span class="status next">next</span>
+      </div>
+      <div class="phase-icon">🛡️</div>
+    </div>
+    <div class="phase-desc">GDPR compliance, bias audits per subscription tier, per-prediction explainability (already partly done via risk factors), audit trail across model versions.</div>
+    <div class="tags">
+      <span class="tag">GDPR data retention</span>
+      <span class="tag">Bias / fairness audit</span>
+      <span class="tag">Model cards</span>
+      <span class="tag">Audit log</span>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  Hover any phase — they lift. Tags mark the concrete files / services behind each phase.
+</footer>
+
+</body>
+</html>
