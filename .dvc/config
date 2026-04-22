@@ -1,4 +1,8 @@
 [core]
-    remote = local-storage
+    remote = r2
 ['remote "local-storage"']
     url = C:/Users/dlokanath/dvc-storage-taalmaster
+['remote "r2"']
+    url = s3://taalmaster-ml-dvc
+    endpointurl = https://85fc2b687d69c64aba25efa33944e412.r2.cloudflarestorage.com
+    region = auto

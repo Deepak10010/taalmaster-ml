@@ -59,13 +59,13 @@ stages:
       size: 2049
     - path: training/train.py
       hash: md5
-      md5: d2d8b6da3cfe2c3d65988d2c8ab085b0
-      size: 16078
+      md5: b138a35ef6387f414a76bd6c45201634
+      size: 16103
     outs:
     - path: artifacts/dropout_model.joblib
       hash: md5
-      md5: a4b903613784a81878bdd787ffaa8787
-      size: 287650
+      md5: 1f8d11374a8f8c74406aabc06e4e6a2c
+      size: 282550
     - path: artifacts/feature_columns.joblib
       hash: md5
       md5: b94191726b88ec40c23d8159ff899601

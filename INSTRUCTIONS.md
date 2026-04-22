@@ -745,6 +745,46 @@ python -m evaluation.drift_check --fail-on-drift \
 ```
 
 **Expected behavior** — some drift is normal even in a healthy product.
+
+### Real-world accuracy measurement — [evaluation/measure_accuracy.py](evaluation/measure_accuracy.py)
+
+Closes the loop between "we served a prediction" and "the prediction was
+right." CV and backtest estimate how the model *should* perform on
+production-shaped data. This script measures how it *actually* performed
+on production data.
+
+Method:
+1. Query `ml_prediction_log` for every prediction older than
+   `--window-days` (so the outcome window has elapsed and we can check
+   the truth).
+2. Join with `study_streaks` to see if the user was active in
+   `(logged_at, logged_at + window_days]`.
+3. No activity → actual dropout = 1. Any activity → actual dropout = 0.
+4. Compute accuracy, precision, recall, F1, ROC AUC against the
+   logged probabilities.
+5. Break out metrics by `model_version` (compare v3 vs v4 on real data,
+   not just CV) and by `risk_level` (does high-risk bucket actually
+   have higher dropout rate?).
+6. Log everything to MLflow under `purpose=real_world_accuracy`.
+
+```bash
+python -m evaluation.measure_accuracy                     # report + log
+python -m evaluation.measure_accuracy --window-days 14    # different window
+python -m evaluation.measure_accuracy --threshold 0.7     # stricter "predicted dropout"
+python -m evaluation.measure_accuracy --no-mlflow         # report only
+```
+
+**Day-1 behavior** — the log table is empty or contains only recent
+entries, so this script returns "No predictions old enough yet." That's
+fine; data accumulates naturally as the admin dashboard is used. Give
+it one full `--window-days` cycle + a few admin visits before expecting
+meaningful numbers.
+
+**Why this is the north-star metric** — if CV says 0.97 F1 but
+real-world says 0.72, you have either (a) feature drift, (b) users
+behaving differently in production than the training distribution, or
+(c) a subtle label-definition mismatch. CV can hide all three;
+real-world accuracy can't.
 `days_since_last_activity`, recent-activity windows, and `account_age_days`
 will always shift if the reference snapshot is more than a few days old,
 because those features encode *calendar* time. A sudden shift in
@@ -1253,6 +1293,7 @@ python -m training.compare_models           # LR vs RF vs XGBoost
 python -m evaluation.backtest               # temporal holdout check
 python -m evaluation.drift_check            # feature drift report (logs to MLflow)
 python -m evaluation.drift_check --fail-on-drift   # exit 1 if any feature drifted
+python -m evaluation.measure_accuracy       # real-world precision/recall from ml_prediction_log
 python -m ingestion.seed_students           # seed 2500 fake students
 python -m ingestion.seed_students --count 500
 python -m scripts.run_extract               # DVC extract step alone

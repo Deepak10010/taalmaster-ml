@@ -10,3 +10,8 @@ artifacts/
 data/
 logs/
 
+# DVC local-only config holds secrets (R2 / S3 credentials). Never commit.
+.dvc/config.local
+.dvc/tmp/
+.dvc/cache/
+

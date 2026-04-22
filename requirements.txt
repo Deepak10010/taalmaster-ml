@@ -23,6 +23,8 @@ pydantic==2.10.4
 
 # Data & pipeline versioning
 dvc==3.67.1
+# S3-compatible remotes (Cloudflare R2, AWS S3, Backblaze B2, MinIO, ...)
+dvc-s3==3.2.2
 
 # Testing
 pytest==8.3.4
