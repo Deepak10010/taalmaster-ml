@@ -1,5 +1,7 @@
 # TaalMaster ML — Student Dropout Prediction
 
+[![CI](https://github.com/Deepak10010/taalmaster-ml/actions/workflows/ci.yml/badge.svg)](https://github.com/Deepak10010/taalmaster-ml/actions/workflows/ci.yml)
+
 Predicts which TaalMaster students are at risk of dropping out, why, and what to do about it.
 
 ## The ML Strategy

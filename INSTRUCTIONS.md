@@ -109,7 +109,8 @@ the model learns to see, and that's what makes it worth the effort.
 19. [Troubleshooting](#19-troubleshooting)
 20. [Lessons Learned](#20-lessons-learned)
 21. [Admin Dashboard Integration (Taalmaster)](#21-admin-dashboard-integration-taalmaster)
-22. [What's Not Done Yet](#22-whats-not-done-yet)
+22. [Continuous Integration (GitHub Actions)](#21b-continuous-integration-github-actions)
+23. [What's Not Done Yet](#22-whats-not-done-yet)
 
 ---
 
@@ -1732,6 +1733,42 @@ Minimal steps:
    FastAPI URL.
 4. **Done.** No React changes needed — the admin dashboard already hits
    `/api/ml/*` via the proxy.
+
+---
+
+## 21B. Continuous Integration (GitHub Actions)
+
+Every pull request and every push to `main` runs the [CI workflow](.github/workflows/ci.yml) on GitHub Actions' free tier. The badge on the repo homepage reflects the status of the most recent run on `main`.
+
+### What CI does
+
+| Step | Purpose |
+|---|---|
+| `pip install -r requirements.txt` | Same dep set as local, with pip cache for speed |
+| `pytest tests/test_feature_engineering.py -v` | Unit tests — locks in temporal-split invariants |
+| `pytest tests/test_pipeline_integration.py -v` | Integration tests — full pipeline on synthetic data |
+| `dvc dag` | Confirms `dvc.yaml` + `dvc.lock` + `params.yaml` parse consistently |
+| `python -c "import yaml; yaml.safe_load(open('params.yaml'))"` | Catches param-file typos early |
+| Smoke import of all 14 modules | Catches circular imports / missing deps / rename typos that lint-only CIs miss |
+
+Total runtime: ~3 minutes with cache, ~5 minutes on first run.
+
+### What CI does NOT do
+
+- **No live DB access.** `DATABASE_URL` is set to a dummy Postgres URL in the CI job env. Unit + integration tests use synthetic data, so no real connection is attempted. To run tests against Neon in CI, add `DATABASE_URL` as a repository secret and reference it via `${{ secrets.DATABASE_URL }}`.
+- **No model retraining**. The integration tests train XGBoost on 200 synthetic students, which is fast (~10s). Full-scale retraining stays on the scheduler.
+- **No DVC remote operations.** `dvc push/pull` would need R2/S3 credentials; CI only validates the pipeline definition, not the artifacts.
+
+### When CI fails
+
+The PR will show a red X and a failing "Tests + DVC validation" check. Click the check to see which step failed. Common causes:
+- A new feature column added to `get_feature_columns()` but the test still asserts `len == 32`
+- A renamed function breaks a transitive import → caught by the smoke import step
+- A `dvc.yaml` edit that introduces a stage with an undefined dep → caught by `dvc dag`
+
+### Adding steps later
+
+If you want to harden further: add `ruff` or `flake8` for lint, add `mypy` for type-checks, or add a second job that builds the Docker image and runs `/health` against it. All on the free tier.
 
 ---
 
