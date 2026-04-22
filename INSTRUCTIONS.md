@@ -1027,6 +1027,37 @@ If you leave `MLFLOW_TRACKING_URI` unset, it defaults to `file:./mlruns`
 (local disk). For a team or production setup, point it at a remote MLflow
 server — the code doesn't change.
 
+### Artifacts in Cloudflare R2
+
+Since 2026-04-22 the `taalmaster-dropout-prediction` experiment is backed
+by `s3://taalmaster-ml-dvc/mlflow-artifacts`. Any run created against this
+experiment pushes its artifacts (joblib, xgboost binary, feature columns,
+classification report, etc.) to R2 — visible in the Cloudflare dashboard.
+
+The tracking backend (run metadata: params, metrics, tags) still lives
+locally at `file:./mlruns`. Only the heavyweight *artifacts* are offloaded.
+
+**Env vars that make this work** — set in `.env`:
+```
+MLFLOW_S3_ENDPOINT_URL=https://<account>.r2.cloudflarestorage.com
+AWS_ACCESS_KEY_ID=<r2 access key>
+AWS_SECRET_ACCESS_KEY=<r2 secret>
+AWS_DEFAULT_REGION=auto
+```
+
+**The legacy experiment** — runs produced before the migration live in
+`taalmaster-dropout-prediction-legacy` with `artifact_location=file:./mlruns/...`.
+They still render in `mlflow ui` but their artifacts only exist on the
+laptop that produced them. Versions registered from these runs (v1–v5 in
+the `taalmaster-dropout` registry) are archived.
+
+**Why this matters for Docker / deployment** — before the migration, the
+containerized API fell back to the local joblib file because the MLflow
+registry returned a Windows-absolute artifact path that didn't exist
+inside a Linux container. After the migration, artifact URIs look like
+`s3://taalmaster-ml-dvc/mlflow-artifacts/...`, which resolve identically
+from any OS given the env vars above.
+
 ---
 
 ## 14. DVC Deep Dive

@@ -25,6 +25,8 @@ pydantic==2.10.4
 dvc==3.67.1
 # S3-compatible remotes (Cloudflare R2, AWS S3, Backblaze B2, MinIO, ...)
 dvc-s3==3.2.2
+# MLflow uses boto3 directly (not the dvc-s3 plumbing) when MLFLOW_S3_ENDPOINT_URL is set.
+boto3==1.42.93
 
 # Testing
 pytest==8.3.4
