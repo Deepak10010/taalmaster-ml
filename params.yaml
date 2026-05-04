@@ -1,9 +1,23 @@
 # DVC-tracked pipeline parameters.
 # Change any value here and `dvc repro` will re-run the stages that depend on it.
 features:
-  # ref_date = now - ref_offset_days  (must be > window_days + 1 so the label
-  # window falls entirely in the observed past)
-  ref_offset_days: 8
+  # ref_date = now - ref_offset_days. Must satisfy two constraints:
+  #   1. The forward label window (ref_date, ref_date + window_days] must sit
+  #      inside data already in BQ.
+  #   2. The forward window must land in a *dense* activity period — otherwise
+  #      almost everyone gets labeled "dropout" by default and the model
+  #      learns nothing useful (seen 2026-05-04: dropout_rate=100%).
+  #
+  # As of 2026-05-04, stg_study_streaks shows dense activity (≥400 users/day)
+  # only up to 2026-04-15. After that there's a cliff (1 user/day).
+  # offset=22 puts ref_date at 2026-04-12, with the forward window in the
+  # last dense days. Re-tune when fresh user activity catches up.
+  #
+  # Investigate the distribution before changing this:
+  #   SELECT activity_date, COUNT(DISTINCT user_id)
+  #   FROM `taalmaster-data-dev.taalmaster_staging_dev.stg_study_streaks`
+  #   GROUP BY 1 ORDER BY 1 DESC;
+  ref_offset_days: 22
   # Label: student is "dropout" if they had zero activity in this many days
   # after ref_date. Same semantics as DROPOUT_DAYS_THRESHOLD in config.py.
   window_days: 3

@@ -22,10 +22,22 @@ PARAMS_PATH = ROOT / "params.yaml"
 
 
 def load_raw() -> dict:
-    """Rebuild the dict shape that build_feature_matrix expects."""
+    """Rebuild the dict shape that build_feature_matrix expects.
+
+    Strips tz from any tz-aware datetime columns. Older parquet snapshots were
+    written with `datetime64[..., UTC]` (BQ TIMESTAMP), and feature_engineering
+    compares those against tz-naive `pd.Timestamp(ref_date)`, which raises
+    `Cannot compare tz-naive and tz-aware datetime-like objects`. The newer
+    extract path strips tz upstream, but normalize here too so a stale parquet
+    can't break the build.
+    """
     raw = {}
     for key in ("students", "streaks", "quizzes", "words", "writing", "audio"):
-        raw[key] = pd.read_parquet(RAW_DIR / f"{key}.parquet")
+        df = pd.read_parquet(RAW_DIR / f"{key}.parquet")
+        for col in df.columns:
+            if pd.api.types.is_datetime64_any_dtype(df[col]) and df[col].dt.tz is not None:
+                df[col] = df[col].dt.tz_convert("UTC").dt.tz_localize(None)
+        raw[key] = df
     with open(RAW_DIR / "content_counts.json") as f:
         raw["content_counts"] = json.load(f)
     return raw
